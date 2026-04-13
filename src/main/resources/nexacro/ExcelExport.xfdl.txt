@@ -1,0 +1,51 @@
+=======================================================
+ Nexacro 17 샘플 화면: ExcelExport.xfdl 구성 가이드
+=======================================================
+
+이 파일은 Nexacro 17 IDE에서 ExcelExport.xfdl 화면을 구성하는 방법을 설명합니다.
+
+■ Import 설정
+  common/ExcelExportUtil.xjs 를 화면 import
+
+■ Dataset
+  - ds_sales (bind: grdSales)
+    columns: id, regionCd, categoryCd, q1Sales, q1Qty, q2Sales, q2Qty, totalSales, regDate
+
+■ Grid: grdSales
+  head row count: 2  ← 멀티헤더를 위해 2행 설정
+
+  Band 설정 (head row 0):
+    Cell(0, 2): text="1분기", colspan=2, bandid="BAND_Q1"
+    Cell(0, 4): text="2분기", colspan=2, bandid="BAND_Q2"
+
+  Body/Head Row 1 컬럼 정의:
+    Col 0: bind=regionCd,   head="지역",     edittype=combo,
+           codecolumn=REGION, codeitem=CODE, textitem=CODE_NM
+           halign=left, size="80,24"
+
+    Col 1: bind=categoryCd, head="카테고리",  edittype=combo,
+           codecolumn=CATEGORY, codeitem=CODE, textitem=CODE_NM
+           halign=left, size="100,24"
+
+    Col 2: bind=q1Sales,    head="매출액",    mask="#,##0",
+           halign=right, size="110,24", bandid=BAND_Q1
+
+    Col 3: bind=q1Qty,      head="수량",      mask="#,##0",
+           halign=center, size="80,24", bandid=BAND_Q1
+
+    Col 4: bind=q2Sales,    head="매출액",    mask="#,##0",
+           halign=right, size="110,24", bandid=BAND_Q2
+
+    Col 5: bind=q2Qty,      head="수량",      mask="#,##0",
+           halign=center, size="80,24", bandid=BAND_Q2
+
+    Col 6: bind=totalSales, head="합계",      mask="#,##0",
+           halign=right, size="120,24", font-weight=bold
+
+■ Button: btnExcelExport
+  text: "Excel Export"
+  onClick 이벤트:
+    fn_exportExcel(this.grdSales, "/excel/export");
+
+■ 서버 데이터 로딩 (onload)
+  transaction("selectSales", "/nexacro/sales/list", "out:ds_sales=ds_sales", "", "fn_callback");

@@ -1,0 +1,247 @@
+/**
+ * ExcelExportUtil.xjs
+ * Nexacro 17 Grid → Excel Export 공통 유틸리티
+ *
+ * 사용법:
+ *   fn_exportExcel(this.grdSales, "/excel/export");
+ *
+ * 서버 스펙:
+ *   POST /excel/export
+ *   Request Body: PlatformData (ds_gridMeta + ds_bandMeta)
+ *   Response: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet (binary)
+ *
+ * NOTE: 데이터(ds_mainData)는 전송하지 않음. 서버가 Oracle DB에서 직접 조회.
+ */
+
+/**
+ * Grid 메타데이터를 수집해 서버로 전송 후 Excel 다운로드.
+ * @param {nexacro.Grid} grd  대상 Grid 컴포넌트
+ * @param {string} svcUrl     서버 URL (예: "/excel/export")
+ */
+function fn_exportExcel(grd, svcUrl) {
+    if (!grd) {
+        alert("Grid 객체가 없습니다.");
+        return;
+    }
+
+    var oPlatformData = new nexacro.PlatformData();
+
+    // ds_gridMeta: 컬럼 메타데이터
+    var dsGridMeta = _buildGridMetaDataset(grd);
+    oPlatformData.addDataSet(dsGridMeta);
+
+    // ds_bandMeta: 밴드(멀티헤더) 메타데이터
+    var dsBandMeta = _buildBandMetaDataset(grd);
+    oPlatformData.addDataSet(dsBandMeta);
+
+    // 서버 전송 + 다운로드
+    _sendExcelRequest(svcUrl, oPlatformData);
+}
+
+/**
+ * Grid 컬럼 메타데이터 Dataset 구성 (ds_gridMeta)
+ *
+ * 서버 ColumnMeta 필드와 1:1 매핑:
+ *   col_id, header_text, col_width, text_align, col_type,
+ *   number_format, date_format, edit_type, combo_group_cd,
+ *   combo_code_col, combo_text_col, band_id,
+ *   bg_color, font_bold, font_size, border_style
+ */
+function _buildGridMetaDataset(grd) {
+    var ds = new nexacro.Dataset();
+    ds.id = "ds_gridMeta";
+    ds.addColumn("col_id",         "STRING", 256);
+    ds.addColumn("header_text",    "STRING", 256);
+    ds.addColumn("col_width",      "INT");
+    ds.addColumn("text_align",     "STRING", 10);
+    ds.addColumn("col_type",       "STRING", 20);
+    ds.addColumn("number_format",  "STRING", 50);
+    ds.addColumn("date_format",    "STRING", 50);
+    ds.addColumn("edit_type",      "STRING", 20);
+    ds.addColumn("combo_group_cd", "STRING", 50);
+    ds.addColumn("combo_code_col", "STRING", 50);
+    ds.addColumn("combo_text_col", "STRING", 50);
+    ds.addColumn("band_id",        "STRING", 50);
+    ds.addColumn("bg_color",       "STRING", 10);
+    ds.addColumn("font_bold",      "STRING", 5);
+    ds.addColumn("font_size",      "INT");
+    ds.addColumn("border_style",   "STRING", 10);
+
+    var nColCount = grd.getColCount();
+
+    for (var col = 0; col < nColCount; col++) {
+        var nRow = ds.addRow();
+
+        // --- col_id: body 셀의 bind 컬럼명 추출 ---
+        // Nexacro Grid body cell의 text 속성은 "expr:ds.columnName" 형태
+        var sCellText = grd.getCellProperty("body", 0, col, "text") || "";
+        var sColId = sCellText;
+        if (sColId.indexOf(".") > -1) {
+            // "expr:datasetId.columnName" → "columnName" 추출
+            sColId = sColId.substring(sColId.lastIndexOf(".") + 1);
+        }
+        ds.setColumn(nRow, "col_id", sColId);
+
+        // --- header_text: head 셀의 text ---
+        var sHeadText = grd.getCellProperty("head", 0, col, "text") || sColId;
+        ds.setColumn(nRow, "header_text", sHeadText);
+
+        // --- col_width: 컬럼 너비 (px) ---
+        var sSize = grd.getCellProperty("body", 0, col, "size") || "100,20";
+        var nWidth = parseInt(sSize.split(",")[0]) || 100;
+        ds.setColumn(nRow, "col_width", nWidth);
+
+        // --- text_align (halign) ---
+        var sHAlign = grd.getCellProperty("body", 0, col, "halign") || "left";
+        ds.setColumn(nRow, "text_align", sHAlign);
+
+        // --- edit_type ---
+        var sEditType = grd.getCellProperty("body", 0, col, "edittype") || "text";
+        ds.setColumn(nRow, "edit_type", sEditType);
+
+        if (sEditType === "combo") {
+            // combo_group_cd: 콤보의 code dataset ID (서버의 CODE_MST GROUP_CD와 매핑)
+            var sCodeDs   = grd.getCellProperty("body", 0, col, "codecolumn") || "";
+            var sCodeCol  = grd.getCellProperty("body", 0, col, "codeitem")   || "CODE";
+            var sTextCol  = grd.getCellProperty("body", 0, col, "textitem")   || "CODE_NM";
+            ds.setColumn(nRow, "combo_group_cd", sCodeDs);
+            ds.setColumn(nRow, "combo_code_col", sCodeCol);
+            ds.setColumn(nRow, "combo_text_col", sTextCol);
+            ds.setColumn(nRow, "col_type",  "text");
+            ds.setColumn(nRow, "number_format", "");
+            ds.setColumn(nRow, "date_format",   "");
+        } else {
+            // mask 속성으로 숫자/날짜 판별
+            var sMask = grd.getCellProperty("body", 0, col, "mask") || "";
+            if (sMask.indexOf("#") > -1 || sMask.indexOf("0") > -1) {
+                ds.setColumn(nRow, "col_type",      "number");
+                ds.setColumn(nRow, "number_format", sMask || "#,##0");
+                ds.setColumn(nRow, "date_format",   "");
+            } else if (sMask.indexOf("yyyy") > -1 || sMask.indexOf("YYYY") > -1) {
+                ds.setColumn(nRow, "col_type",    "date");
+                ds.setColumn(nRow, "date_format", sMask);
+                ds.setColumn(nRow, "number_format", "");
+            } else {
+                ds.setColumn(nRow, "col_type",      "text");
+                ds.setColumn(nRow, "number_format", "");
+                ds.setColumn(nRow, "date_format",   "");
+            }
+        }
+
+        // --- band_id: body 셀의 bandid 속성 ---
+        var sBandId = grd.getCellProperty("body", 0, col, "bandid") || "";
+        ds.setColumn(nRow, "band_id", sBandId);
+
+        // --- style 정보 ---
+        var sBgColor   = grd.getCellProperty("body", 0, col, "background") || "";
+        var sFontWeight = grd.getCellProperty("body", 0, col, "font-weight") || "";
+        ds.setColumn(nRow, "bg_color",     sBgColor);
+        ds.setColumn(nRow, "font_bold",    sFontWeight === "bold" ? "true" : "false");
+        ds.setColumn(nRow, "font_size",    11);
+        ds.setColumn(nRow, "border_style", "thin");
+    }
+    return ds;
+}
+
+/**
+ * 밴드(멀티헤더) 메타데이터 Dataset 구성 (ds_bandMeta)
+ *
+ * head row 0 기준으로 colspan이 있는 셀을 밴드로 인식.
+ * Nexacro 17에서 멀티헤더는 head row count = 2로 설정하고
+ * head row 0에 band 텍스트 + colspan을 정의함.
+ */
+function _buildBandMetaDataset(grd) {
+    var ds = new nexacro.Dataset();
+    ds.id = "ds_bandMeta";
+    ds.addColumn("band_id",    "STRING", 50);
+    ds.addColumn("band_text",  "STRING", 256);
+    ds.addColumn("col_span",   "INT");
+    ds.addColumn("row_span",   "INT");
+    ds.addColumn("band_order", "INT");
+    ds.addColumn("bg_color",   "STRING", 10);
+    ds.addColumn("text_align", "STRING", 10);
+    ds.addColumn("font_bold",  "STRING", 5);
+
+    // head row가 1개 이하이면 밴드 없음
+    if (grd.getHeadRowCount() < 2) return ds;
+
+    var processedBands = {};
+    var nBandOrder = 1;
+    var nColCount = grd.getColCount();
+
+    for (var col = 0; col < nColCount; col++) {
+        // body 셀의 bandid 속성으로 band 식별
+        var sBandId = grd.getCellProperty("body", 0, col, "bandid") || "";
+        if (!sBandId || processedBands[sBandId]) continue;
+
+        // head row 0에서 band 텍스트와 colspan 조회
+        var sBandText = grd.getCellProperty("head", 0, col, "text")    || "";
+        var nColSpan  = grd.getCellProperty("head", 0, col, "colspan") || 1;
+
+        var nRow = ds.addRow();
+        ds.setColumn(nRow, "band_id",    sBandId);
+        ds.setColumn(nRow, "band_text",  sBandText);
+        ds.setColumn(nRow, "col_span",   parseInt(nColSpan));
+        ds.setColumn(nRow, "row_span",   1);
+        ds.setColumn(nRow, "band_order", nBandOrder++);
+        ds.setColumn(nRow, "bg_color",   "#D9E1F2");
+        ds.setColumn(nRow, "text_align", "center");
+        ds.setColumn(nRow, "font_bold",  "true");
+
+        processedBands[sBandId] = true;
+    }
+    return ds;
+}
+
+/**
+ * PlatformData를 서버로 POST 전송 → 바이너리 응답을 파일 다운로드.
+ *
+ * XMLHttpRequest를 사용하여 동기 POST로 서버에 전송.
+ * 응답이 binary이면 Blob URL을 생성하여 파일 다운로드 트리거.
+ *
+ * @param {string} svcUrl           서버 엔드포인트
+ * @param {nexacro.PlatformData} oPlatformData  전송할 PlatformData
+ */
+function _sendExcelRequest(svcUrl, oPlatformData) {
+    try {
+        // PlatformData를 텍스트(XML)로 직렬화
+        var sPlatformText = oPlatformData.saveToString();
+
+        var oXhr = nexacro.util.createXMLHttpRequest();
+        oXhr.open("POST", svcUrl, false);  // synchronous
+        oXhr.setRequestHeader("Content-Type", "application/xml; charset=utf-8");
+        oXhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+        oXhr.responseType = "arraybuffer";  // binary 응답
+        oXhr.send(sPlatformText);
+
+        if (oXhr.status === 200) {
+            // ArrayBuffer → Blob → ObjectURL → <a> 클릭 → 다운로드
+            var blob = new Blob([oXhr.response], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+            var sUrl = URL.createObjectURL(blob);
+            var oA   = document.createElement("a");
+            oA.href     = sUrl;
+            oA.download = "export_" + _getToday() + ".xlsx";
+            document.body.appendChild(oA);
+            oA.click();
+            document.body.removeChild(oA);
+            URL.revokeObjectURL(sUrl);
+        } else {
+            alert("Excel 다운로드 실패 (HTTP " + oXhr.status + ")");
+        }
+    } catch (e) {
+        alert("Excel 내보내기 오류: " + e.message);
+    }
+}
+
+/**
+ * 오늘 날짜를 yyyyMMdd 형식으로 반환.
+ */
+function _getToday() {
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, "0");
+    var day = String(d.getDate()).padStart(2, "0");
+    return y + m + day;
+}
