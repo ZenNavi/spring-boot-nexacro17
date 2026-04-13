@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.nexacro.mapper.SalesMapper">
+
+    <!--
+        alias를 camelCase로 통일 — ColumnMeta.colId와 매핑됨.
+        MyBatis map-underscore-to-camelCase는 Map에 적용 안 되므로 alias 명시.
+        TO_CHAR는 H2 Oracle mode에서 지원됨.
+    -->
+    <select id="selectAll" resultType="java.util.LinkedHashMap">
+        SELECT
+            ID              AS id,
+            REGION_CD       AS regionCd,
+            CATEGORY_CD     AS categoryCd,
+            Q1_SALES        AS q1Sales,
+            Q1_QTY          AS q1Qty,
+            Q2_SALES        AS q2Sales,
+            Q2_QTY          AS q2Qty,
+            TOTAL_SALES     AS totalSales,
+            TO_CHAR(REG_DATE, 'YYYY-MM-DD') AS regDate
+        FROM SALES_DATA
+        ORDER BY ID
+    </select>
+
+</mapper>

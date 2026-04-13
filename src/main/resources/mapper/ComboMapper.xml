@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.nexacro.mapper.ComboMapper">
+
+    <select id="selectByGroupCds" resultType="com.example.nexacro.dto.CodeMst">
+        SELECT
+            GROUP_CD   AS groupCd,
+            CODE       AS code,
+            CODE_NM    AS codeNm,
+            SORT_ORDER AS sortOrder
+        FROM CODE_MST
+        WHERE GROUP_CD IN
+        <foreach collection="groupCds" item="gcd" open="(" separator="," close=")">
+            #{gcd}
+        </foreach>
+        ORDER BY GROUP_CD, SORT_ORDER
+    </select>
+
+</mapper>
