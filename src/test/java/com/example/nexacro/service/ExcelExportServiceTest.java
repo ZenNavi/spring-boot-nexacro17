@@ -5,26 +5,22 @@ import com.example.nexacro.excel.*;
 import com.example.nexacro.mapper.ComboMapper;
 import com.example.nexacro.mapper.SalesMapper;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class ExcelExportServiceTest {
 
-    private SalesMapper salesMapper;
-    private ComboMapper comboMapper;
-    private ExcelBuilderTestDouble excelBuilder;
-    private ExcelExportService service;
-
-    @BeforeEach
-    void setUp() {
-        salesMapper = mock(SalesMapper.class);
-        comboMapper = mock(ComboMapper.class);
-        excelBuilder = new ExcelBuilderTestDouble();
-        service = new ExcelExportService(salesMapper, comboMapper, excelBuilder);
-    }
+    @Mock SalesMapper salesMapper;
+    @Mock ComboMapper comboMapper;
+    @Mock NexacroGridExcelBuilder excelBuilder;
+    @InjectMocks ExcelExportService service;
 
     @Test
     void exportExcel_queries_db_and_returns_bytes() throws Exception {
@@ -46,14 +42,15 @@ class ExcelExportServiceTest {
             .thenReturn(Collections.singletonList(code));
         when(salesMapper.selectAll())
             .thenReturn(Collections.singletonList(row));
-        excelBuilder.setReturnValue(new byte[]{1, 2, 3});
+        when(excelBuilder.build(eq(columns), eq(bands), eq(Collections.singletonList(row)),
+                                any(ComboResolver.class)))
+            .thenReturn(new byte[]{1, 2, 3});
 
         byte[] result = service.exportExcel(columns, bands);
 
         assertThat(result).isEqualTo(new byte[]{1, 2, 3});
-        assertThat(excelBuilder.getLastCallColumns()).isEqualTo(columns);
-        assertThat(excelBuilder.getLastCallBands()).isEqualTo(bands);
-        assertThat(excelBuilder.getLastCallRows()).isEqualTo(Collections.singletonList(row));
+        verify(comboMapper).selectByGroupCds(Collections.singletonList("REGION"));
+        verify(salesMapper).selectAll();
     }
 
     @Test
@@ -64,52 +61,11 @@ class ExcelExportServiceTest {
                 .colWidth(120).fontSize(10).borderStyle("thin").build()
         );
         when(salesMapper.selectAll()).thenReturn(Collections.emptyList());
-        excelBuilder.setReturnValue(new byte[]{});
+        when(excelBuilder.build(any(), any(), any(), any())).thenReturn(new byte[]{});
 
         byte[] result = service.exportExcel(columns, Collections.emptyList());
 
-        // comboMapper should NOT be called when no combo columns
         assertThat(result).isNotNull();
-        verify(comboMapper, never())
-            .selectByGroupCds(any());
-    }
-
-    static class ExcelBuilderTestDouble extends NexacroGridExcelBuilder {
-        private byte[] returnValue = new byte[]{};
-        private List<ColumnMeta> lastCallColumns;
-        private List<BandMeta> lastCallBands;
-        private List<Map<String, Object>> lastCallRows;
-        private ComboResolver lastCallComboResolver;
-
-        public void setReturnValue(byte[] value) {
-            this.returnValue = value;
-        }
-
-        @Override
-        public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
-                           List<Map<String, Object>> dataRows,
-                           ComboResolver comboResolver) throws Exception {
-            this.lastCallColumns = columns;
-            this.lastCallBands = bands;
-            this.lastCallRows = dataRows;
-            this.lastCallComboResolver = comboResolver;
-            return returnValue;
-        }
-
-        public List<ColumnMeta> getLastCallColumns() {
-            return lastCallColumns;
-        }
-
-        public List<BandMeta> getLastCallBands() {
-            return lastCallBands;
-        }
-
-        public List<Map<String, Object>> getLastCallRows() {
-            return lastCallRows;
-        }
-
-        public ComboResolver getLastCallComboResolver() {
-            return lastCallComboResolver;
-        }
+        verify(comboMapper, never()).selectByGroupCds(any());
     }
 }
