@@ -1,164 +1,174 @@
 package com.example.nexacro.util;
 
-import java.time.*;
-import java.time.format.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
 import java.util.regex.Pattern;
 
 /**
  * Utility for parsing various date/time string formats into Java time objects.
  *
  * Supported input formats:
- *   20260227                   → yyyyMMdd
- *   0930                       → HHmm
- *   09:30                      → HH:mm
- *   2205-02-27                 → yyyy-MM-dd
- *   2202-01-30 12:12:12        → yyyy-MM-dd HH:mm:ss
- *   2206-02-27 12:12:12.12345  → yyyy-MM-dd HH:mm:ss.S (fractional seconds)
- *   2206.02.27                 → yyyy.MM.dd
+ *   20260227                   -> yyyyMMdd
+ *   0930                       -> HHmm
+ *   09:30                      -> HH:mm
+ *   09:30:45                   -> HH:mm:ss
+ *   2205-02-27                 -> yyyy-MM-dd
+ *   2205-02-27 12:12           -> yyyy-MM-dd HH:mm
+ *   2202-01-30 12:12:12        -> yyyy-MM-dd HH:mm:ss
+ *   2206-02-27 12:12:12.12345  -> yyyy-MM-dd HH:mm:ss.S (fractional seconds)
+ *   2206.02.27                 -> yyyy.MM.dd
  */
 public class DateParseUtil {
 
     public enum DateType { DATE, TIME, DATETIME }
 
-    // ---------------------------------------------------------------------------
-    // ParseResult
-    // ---------------------------------------------------------------------------
+    public static class ParseResult {
+        private final DateType type;
+        private final LocalDate date;
+        private final LocalTime time;
 
-    public record ParseResult(DateType type, LocalDate date, LocalTime time) {
-
-        public static ParseResult ofDate(LocalDate d) {
-            return new ParseResult(DateType.DATE, d, null);
+        private ParseResult(DateType type, LocalDate date, LocalTime time) {
+            this.type = type;
+            this.date = date;
+            this.time = time;
         }
 
-        public static ParseResult ofTime(LocalTime t) {
-            return new ParseResult(DateType.TIME, null, t);
+        public static ParseResult ofDate(LocalDate date) {
+            return new ParseResult(DateType.DATE, date, null);
         }
 
-        public static ParseResult ofDateTime(LocalDate d, LocalTime t) {
-            return new ParseResult(DateType.DATETIME, d, t);
+        public static ParseResult ofTime(LocalTime time) {
+            return new ParseResult(DateType.TIME, null, time);
         }
 
-        /** Convert to LocalDateTime. TIME-only uses today's date; DATE-only uses midnight. */
+        public static ParseResult ofDateTime(LocalDate date, LocalTime time) {
+            return new ParseResult(DateType.DATETIME, date, time);
+        }
+
+        public DateType type() {
+            return type;
+        }
+
+        public LocalDate date() {
+            return date;
+        }
+
+        public LocalTime time() {
+            return time;
+        }
+
         public LocalDateTime toLocalDateTime() {
-            return switch (type) {
-                case DATE     -> date.atStartOfDay();
-                case TIME     -> LocalDate.now().atTime(time);
-                case DATETIME -> LocalDateTime.of(date, time);
-            };
+            if (type == DateType.DATE) {
+                return date.atStartOfDay();
+            }
+            if (type == DateType.TIME) {
+                return LocalDate.now().atTime(time);
+            }
+            return LocalDateTime.of(date, time);
         }
 
-        /** Extract LocalDate. TIME-only returns today. */
         public LocalDate toLocalDate() {
-            return switch (type) {
-                case DATE, DATETIME -> date;
-                case TIME           -> LocalDate.now();
-            };
+            if (type == DateType.TIME) {
+                return LocalDate.now();
+            }
+            return date;
         }
 
-        /** Extract LocalTime. DATE-only returns midnight. */
         public LocalTime toLocalTime() {
-            return switch (type) {
-                case TIME, DATETIME -> time;
-                case DATE           -> LocalTime.MIDNIGHT;
-            };
+            if (type == DateType.DATE) {
+                return LocalTime.MIDNIGHT;
+            }
+            return time;
         }
 
-        /** Format using a pattern string (e.g. "yyyy/MM/dd HH:mm:ss"). */
         public String format(String pattern) {
             return toLocalDateTime().format(DateTimeFormatter.ofPattern(pattern));
         }
 
-        /** Format using a DateTimeFormatter. */
         public String format(DateTimeFormatter formatter) {
             return toLocalDateTime().format(formatter);
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Regex patterns  (ordered from most-specific to least-specific)
-    // ---------------------------------------------------------------------------
-
-    private static final Pattern P_DATETIME_FRAC  =
+    private static final Pattern P_DATETIME_FRAC =
             Pattern.compile("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+$");
-    private static final Pattern P_DATETIME_DASH  =
+    private static final Pattern P_DATETIME_MINUTE =
+            Pattern.compile("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$");
+    private static final Pattern P_DATETIME_DASH =
             Pattern.compile("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$");
-    private static final Pattern P_DATE_COMPACT   = Pattern.compile("^\\d{8}$");
-    private static final Pattern P_DATE_DASH      = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
-    private static final Pattern P_DATE_DOT       = Pattern.compile("^\\d{4}\\.\\d{2}\\.\\d{2}$");
-    private static final Pattern P_TIME_COMPACT   = Pattern.compile("^\\d{4}$");
-    private static final Pattern P_TIME_COLON     = Pattern.compile("^\\d{2}:\\d{2}$");
+    private static final Pattern P_DATE_COMPACT = Pattern.compile("^\\d{8}$");
+    private static final Pattern P_DATE_DASH = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
+    private static final Pattern P_DATE_DOT = Pattern.compile("^\\d{4}\\.\\d{2}\\.\\d{2}$");
+    private static final Pattern P_TIME_COMPACT = Pattern.compile("^\\d{4}$");
+    private static final Pattern P_TIME_COLON_SEC = Pattern.compile("^\\d{2}:\\d{2}:\\d{2}$");
+    private static final Pattern P_TIME_COLON = Pattern.compile("^\\d{2}:\\d{2}$");
 
-    // ---------------------------------------------------------------------------
-    // Formatters
-    // ---------------------------------------------------------------------------
-
-    private static final DateTimeFormatter FMT_DATE_COMPACT  =
+    private static final DateTimeFormatter FMT_DATE_COMPACT =
             DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final DateTimeFormatter FMT_TIME_COMPACT  =
+    private static final DateTimeFormatter FMT_TIME_COMPACT =
             DateTimeFormatter.ofPattern("HHmm");
-    private static final DateTimeFormatter FMT_TIME_COLON    =
+    private static final DateTimeFormatter FMT_TIME_COLON =
             DateTimeFormatter.ofPattern("HH:mm");
-    private static final DateTimeFormatter FMT_DATE_DASH     =
+    private static final DateTimeFormatter FMT_TIME_COLON_SEC =
+            DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter FMT_DATE_DASH =
             DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter FMT_DATETIME_MINUTE =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter FMT_DATETIME_DASH =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final DateTimeFormatter FMT_DATE_DOT      =
+    private static final DateTimeFormatter FMT_DATE_DOT =
             DateTimeFormatter.ofPattern("yyyy.MM.dd");
-    // Supports 1–9 fractional-second digits
     private static final DateTimeFormatter FMT_DATETIME_FRAC =
             new DateTimeFormatterBuilder()
                     .appendPattern("yyyy-MM-dd HH:mm:ss")
                     .appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
                     .toFormatter();
 
-    // ---------------------------------------------------------------------------
-    // Core parse
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Parse a date/time string into a {@link ParseResult}.
-     *
-     * @param input date/time string in any supported format
-     * @return ParseResult containing DateType and parsed values
-     * @throws IllegalArgumentException if the format is not recognized
-     */
     public static ParseResult parse(String input) {
-        if (input == null || input.isBlank()) {
+        if (input == null || input.trim().isEmpty()) {
             throw new IllegalArgumentException("Input is null or empty");
         }
-        String s = input.trim();
+        String value = input.trim();
 
-        if (P_DATETIME_FRAC.matcher(s).matches()) {
-            LocalDateTime ldt = LocalDateTime.parse(s, FMT_DATETIME_FRAC);
-            return ParseResult.ofDateTime(ldt.toLocalDate(), ldt.toLocalTime());
+        if (P_DATETIME_FRAC.matcher(value).matches()) {
+            LocalDateTime dateTime = LocalDateTime.parse(value, FMT_DATETIME_FRAC);
+            return ParseResult.ofDateTime(dateTime.toLocalDate(), dateTime.toLocalTime());
         }
-        if (P_DATETIME_DASH.matcher(s).matches()) {
-            LocalDateTime ldt = LocalDateTime.parse(s, FMT_DATETIME_DASH);
-            return ParseResult.ofDateTime(ldt.toLocalDate(), ldt.toLocalTime());
+        if (P_DATETIME_MINUTE.matcher(value).matches()) {
+            LocalDateTime dateTime = LocalDateTime.parse(value, FMT_DATETIME_MINUTE);
+            return ParseResult.ofDateTime(dateTime.toLocalDate(), dateTime.toLocalTime());
         }
-        if (P_DATE_COMPACT.matcher(s).matches()) {
-            return ParseResult.ofDate(LocalDate.parse(s, FMT_DATE_COMPACT));
+        if (P_DATETIME_DASH.matcher(value).matches()) {
+            LocalDateTime dateTime = LocalDateTime.parse(value, FMT_DATETIME_DASH);
+            return ParseResult.ofDateTime(dateTime.toLocalDate(), dateTime.toLocalTime());
         }
-        if (P_DATE_DASH.matcher(s).matches()) {
-            return ParseResult.ofDate(LocalDate.parse(s, FMT_DATE_DASH));
+        if (P_DATE_COMPACT.matcher(value).matches()) {
+            return ParseResult.ofDate(LocalDate.parse(value, FMT_DATE_COMPACT));
         }
-        if (P_DATE_DOT.matcher(s).matches()) {
-            return ParseResult.ofDate(LocalDate.parse(s, FMT_DATE_DOT));
+        if (P_DATE_DASH.matcher(value).matches()) {
+            return ParseResult.ofDate(LocalDate.parse(value, FMT_DATE_DASH));
         }
-        if (P_TIME_COMPACT.matcher(s).matches()) {
-            return ParseResult.ofTime(LocalTime.parse(s, FMT_TIME_COMPACT));
+        if (P_DATE_DOT.matcher(value).matches()) {
+            return ParseResult.ofDate(LocalDate.parse(value, FMT_DATE_DOT));
         }
-        if (P_TIME_COLON.matcher(s).matches()) {
-            return ParseResult.ofTime(LocalTime.parse(s, FMT_TIME_COLON));
+        if (P_TIME_COMPACT.matcher(value).matches()) {
+            return ParseResult.ofTime(LocalTime.parse(value, FMT_TIME_COMPACT));
+        }
+        if (P_TIME_COLON_SEC.matcher(value).matches()) {
+            return ParseResult.ofTime(LocalTime.parse(value, FMT_TIME_COLON_SEC));
+        }
+        if (P_TIME_COLON.matcher(value).matches()) {
+            return ParseResult.ofTime(LocalTime.parse(value, FMT_TIME_COLON));
         }
 
         throw new IllegalArgumentException("Unsupported date format: [" + input + "]");
     }
-
-    // ---------------------------------------------------------------------------
-    // Convenience shortcuts
-    // ---------------------------------------------------------------------------
 
     public static LocalDate toLocalDate(String input) {
         return parse(input).toLocalDate();
@@ -172,15 +182,50 @@ public class DateParseUtil {
         return parse(input).toLocalDateTime();
     }
 
-    /**
-     * Parse input and reformat to the given pattern.
-     * Example: format("20260227", "yyyy/MM/dd") → "2026/02/27"
-     */
     public static String format(String input, String pattern) {
         return parse(input).format(pattern);
     }
 
     public static String format(String input, DateTimeFormatter formatter) {
         return parse(input).format(formatter);
+    }
+
+    public static String format(String input, String inputPattern, String outputPattern) {
+        return format(input,
+                DateTimeFormatter.ofPattern(inputPattern),
+                DateTimeFormatter.ofPattern(outputPattern));
+    }
+
+    public static String format(String input, DateTimeFormatter inputFormatter, String outputPattern) {
+        return format(input, inputFormatter, DateTimeFormatter.ofPattern(outputPattern));
+    }
+
+    public static String format(String input, String inputPattern, DateTimeFormatter outputFormatter) {
+        return format(input, DateTimeFormatter.ofPattern(inputPattern), outputFormatter);
+    }
+
+    public static String format(String input, DateTimeFormatter inputFormatter, DateTimeFormatter outputFormatter) {
+        if (input == null || input.trim().isEmpty()) {
+            throw new IllegalArgumentException("Input is null or empty");
+        }
+
+        TemporalAccessor parsed = inputFormatter.parseBest(
+                input.trim(),
+                LocalDateTime::from,
+                LocalDate::from,
+                LocalTime::from
+        );
+
+        if (parsed instanceof LocalDateTime) {
+            return outputFormatter.format((LocalDateTime) parsed);
+        }
+        if (parsed instanceof LocalDate) {
+            return outputFormatter.format((LocalDate) parsed);
+        }
+        if (parsed instanceof LocalTime) {
+            return outputFormatter.format((LocalTime) parsed);
+        }
+
+        throw new IllegalArgumentException("Unsupported temporal value: [" + input + "]");
     }
 }

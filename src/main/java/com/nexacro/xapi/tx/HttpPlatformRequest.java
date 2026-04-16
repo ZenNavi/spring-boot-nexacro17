@@ -3,7 +3,7 @@ package com.nexacro.xapi.tx;
 import com.nexacro.xapi.data.DataSet;
 import com.nexacro.xapi.data.PlatformData;
 
-import jakarta.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequest;
 
 /**
  * Stub for com.nexacro.xapi.tx.HttpPlatformRequest.
