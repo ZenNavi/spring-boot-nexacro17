@@ -5,9 +5,10 @@
 <mapper namespace="com.example.nexacro.mapper.SalesMapper">
 
     <!--
-        alias를 camelCase로 통일 — ColumnMeta.colId와 매핑됨.
-        MyBatis map-underscore-to-camelCase는 Map에 적용 안 되므로 alias 명시.
-        TO_CHAR는 H2 Oracle mode에서 지원됨.
+        List 기반 조회용 SQL.
+        Map 결과에서는 map-underscore-to-camelCase가 자동 적용되지 않으므로
+        ColumnMeta.colId와 맞추기 위해 alias를 camelCase로 명시한다.
+        날짜는 문자열로 바로 내려 서비스/정책 없이도 기존 동작을 유지한다.
     -->
     <select id="selectAll" resultType="java.util.LinkedHashMap">
         SELECT
@@ -24,6 +25,10 @@
         ORDER BY ID
     </select>
 
+    <!--
+        RowHandler 기반 streaming 조회용 SQL.
+        날짜 원본값을 그대로 내려 정책 계층에서 업무별 포맷을 적용할 수 있게 한다.
+    -->
     <select id="selectAllWithHandler" resultType="java.util.LinkedHashMap">
         SELECT
             ID              AS id,

@@ -29,12 +29,20 @@ import java.util.Set;
 @Component
 public class NexacroGridExcelBuilder {
 
+    /**
+     * 기존 호출 호환을 위한 기본 진입점이다.
+     *
+     * <p>List 기반 데이터를 받아 기본 렌더링 정책으로 Excel을 생성한다.</p>
+     */
     public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
                         List<Map<String, Object>> dataRows,
                         ComboResolver comboResolver) throws Exception {
         return build(columns, bands, dataRows, comboResolver, new DefaultExcelRenderPolicy());
     }
 
+    /**
+     * List 기반 데이터 + 사용자 지정 렌더링 정책으로 Excel을 생성한다.
+     */
     public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
                         List<Map<String, Object>> dataRows,
                         ComboResolver comboResolver,
@@ -42,6 +50,11 @@ public class NexacroGridExcelBuilder {
         return build(columns, bands, ExcelRowWriter.fromList(dataRows), comboResolver, renderPolicy);
     }
 
+    /**
+     * Row 단위 공급 방식까지 포함한 최종 build 진입점이다.
+     *
+     * <p>{@link SXSSFWorkbook}을 사용해 대량 row 처리 시 메모리 사용량을 줄인다.</p>
+     */
     public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
                         ExcelRowWriter rowWriter,
                         ComboResolver comboResolver,
@@ -68,6 +81,11 @@ public class NexacroGridExcelBuilder {
 
     // ── Header ───────────────────────────────────────────────────────────
 
+    /**
+     * Grid 메타데이터를 기반으로 헤더 영역을 생성한다.
+     *
+     * <p>band가 없으면 1줄, band가 있으면 상단 band / 하단 column 헤더 2줄 구조를 만든다.</p>
+     */
     private int createHeader(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
                              List<BandMeta> bands, boolean hasBands) {
         if (!hasBands) {
@@ -135,6 +153,12 @@ public class NexacroGridExcelBuilder {
 
     // ── Data Rows ─────────────────────────────────────────────────────────
 
+    /**
+     * 공급된 row 데이터를 순차적으로 Excel data row로 기록한다.
+     *
+     * <p>이 메서드가 builder 확장의 핵심이다. row source는 List일 수도 있고,
+     * ResultHandler 기반 스트리밍일 수도 있다.</p>
+     */
     private void createDataRows(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
                                 ExcelRowWriter rowWriter, ComboResolver comboResolver,
                                 ExcelRenderPolicy renderPolicy,
@@ -153,6 +177,7 @@ public class NexacroGridExcelBuilder {
                         Object rawValue = data.get(col.getColId());
                         ExcelCellContext context = new ExcelCellContext(
                                 col, data, rawValue, relativeRowIndex, c, comboResolver);
+                        // 값 변환과 스타일 변환은 정책 객체에 위임한다.
                         Object resolvedValue = renderPolicy.resolveCellValue(context);
                         ExcelCellStyleSpec styleSpec = renderPolicy.resolveCellStyle(context);
                         Cell cell = row.createCell(c);
@@ -227,6 +252,12 @@ public class NexacroGridExcelBuilder {
         return style;
     }
 
+    /**
+     * 스타일 캐시 키를 만든다.
+     *
+     * <p>셀마다 스타일 객체를 새로 만들면 POI 성능과 메모리 사용량이 불리해지므로
+     * 동일 조건의 스타일은 재사용한다.</p>
+     */
     private String buildStyleKey(ColumnMeta col, ExcelCellStyleSpec styleSpec) {
         return col.getColId() + "|" + valueOrEmpty(styleSpec.getTextAlign(), col.getTextAlign()) + "|"
                 + valueOrEmpty(styleSpec.getNumberFormat(), col.getNumberFormat()) + "|"
@@ -260,6 +291,7 @@ public class NexacroGridExcelBuilder {
         if (backgroundColor != null) {
             applyBgColor(style, backgroundColor);
         }
+        // 숫자 컬럼은 메타 또는 정책에서 지정한 number format을 적용한다.
         if ("number".equals(col.getColType()) && numberFormat != null) {
             DataFormat dataFormat = wb.createDataFormat();
             style.setDataFormat(dataFormat.getFormat(numberFormat));

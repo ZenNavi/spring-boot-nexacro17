@@ -1,5 +1,11 @@
 package com.example.nexacro.excel;
 
+/**
+ * 셀 스타일 override 값을 담는 DTO다.
+ *
+ * <p>기본 스타일은 {@link ColumnMeta}를 기준으로 만들고, 이 객체에 값이 있으면
+ * 해당 속성만 덮어쓴다. 즉 서비스별 정책에서 "필요한 속성만" 바꿀 수 있다.</p>
+ */
 public class ExcelCellStyleSpec {
     private String textAlign;
     private String backgroundColor;
