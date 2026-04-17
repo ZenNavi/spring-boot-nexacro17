@@ -1,13 +1,30 @@
 package com.example.nexacro.excel;
 
-import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataFormat;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.util.CellRangeAddress;
-import org.apache.poi.xssf.usermodel.*;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.springframework.stereotype.Component;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Component
 public class NexacroGridExcelBuilder {
@@ -15,25 +32,43 @@ public class NexacroGridExcelBuilder {
     public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
                         List<Map<String, Object>> dataRows,
                         ComboResolver comboResolver) throws Exception {
+        return build(columns, bands, dataRows, comboResolver, new DefaultExcelRenderPolicy());
+    }
 
-        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+    public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
+                        List<Map<String, Object>> dataRows,
+                        ComboResolver comboResolver,
+                        ExcelRenderPolicy renderPolicy) throws Exception {
+        return build(columns, bands, ExcelRowWriter.fromList(dataRows), comboResolver, renderPolicy);
+    }
+
+    public byte[] build(List<ColumnMeta> columns, List<BandMeta> bands,
+                        ExcelRowWriter rowWriter,
+                        ComboResolver comboResolver,
+                        ExcelRenderPolicy renderPolicy) throws Exception {
+        SXSSFWorkbook workbook = new SXSSFWorkbook(200);
+        workbook.setCompressTempFiles(true);
+        try {
             Sheet sheet = workbook.createSheet("Sheet1");
             boolean hasBands = bands != null && !bands.isEmpty();
 
             int dataStartRow = createHeader(workbook, sheet, columns, bands, hasBands);
-            createDataRows(workbook, sheet, columns, dataRows, comboResolver, dataStartRow);
+            createDataRows(workbook, sheet, columns, rowWriter, comboResolver, renderPolicy, dataStartRow);
             setColumnWidths(sheet, columns);
             sheet.createFreezePane(0, dataStartRow);
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             workbook.write(out);
             return out.toByteArray();
+        } finally {
+            workbook.dispose();
+            workbook.close();
         }
     }
 
     // ── Header ───────────────────────────────────────────────────────────
 
-    private int createHeader(XSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
+    private int createHeader(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
                              List<BandMeta> bands, boolean hasBands) {
         if (!hasBands) {
             Row row = sheet.createRow(0);
@@ -100,46 +135,65 @@ public class NexacroGridExcelBuilder {
 
     // ── Data Rows ─────────────────────────────────────────────────────────
 
-    private void createDataRows(XSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
-                                List<Map<String, Object>> dataRows, ComboResolver comboResolver,
+    private void createDataRows(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
+                                ExcelRowWriter rowWriter, ComboResolver comboResolver,
+                                ExcelRenderPolicy renderPolicy,
                                 int startRowIdx) {
-        Map<String, CellStyle> styleCache = new HashMap<>();
-        for (int r = 0; r < dataRows.size(); r++) {
-            Row row = sheet.createRow(startRowIdx + r);
-            row.setHeightInPoints(16);
-            Map<String, Object> data = dataRows.get(r);
-            for (int c = 0; c < columns.size(); c++) {
-                ColumnMeta col = columns.get(c);
-                Cell cell = row.createCell(c);
-                setCellValue(cell, col, data.get(col.getColId()), comboResolver);
-                cell.setCellStyle(getOrCreateDataStyle(wb, col, styleCache));
-            }
+        final Map<String, CellStyle> styleCache = new HashMap<String, CellStyle>();
+        final int[] rowIndex = new int[]{startRowIdx};
+        try {
+            rowWriter.writeRows(new ExcelRowConsumer() {
+                @Override
+                public void accept(Map<String, Object> data) throws Exception {
+                    Row row = sheet.createRow(rowIndex[0]);
+                    row.setHeightInPoints(16);
+                    int relativeRowIndex = rowIndex[0] - startRowIdx;
+                    for (int c = 0; c < columns.size(); c++) {
+                        ColumnMeta col = columns.get(c);
+                        Object rawValue = data.get(col.getColId());
+                        ExcelCellContext context = new ExcelCellContext(
+                                col, data, rawValue, relativeRowIndex, c, comboResolver);
+                        Object resolvedValue = renderPolicy.resolveCellValue(context);
+                        ExcelCellStyleSpec styleSpec = renderPolicy.resolveCellStyle(context);
+                        Cell cell = row.createCell(c);
+                        setCellValue(cell, col, resolvedValue);
+                        cell.setCellStyle(getOrCreateDataStyle(wb, col, styleSpec, styleCache));
+                    }
+                    rowIndex[0]++;
+                }
+            });
+        } catch (RuntimeException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to write excel rows", ex);
         }
     }
 
-    private void setCellValue(Cell cell, ColumnMeta col, Object value, ComboResolver comboResolver) {
-        if (value == null) { cell.setCellValue(""); return; }
-        if ("combo".equals(col.getEditType())) {
-            cell.setCellValue(comboResolver.resolve(col.getComboGroupCd(), value.toString()));
-        } else if ("number".equals(col.getColType())) {
-            if (value instanceof Number) {
-                cell.setCellValue(((Number) value).doubleValue());
-            } else {
-                try { cell.setCellValue(Double.parseDouble(value.toString())); }
-                catch (NumberFormatException e) { cell.setCellValue(value.toString()); }
-            }
-        } else {
-            cell.setCellValue(value.toString());
+    private void setCellValue(Cell cell, ColumnMeta col, Object value) {
+        if (value == null) {
+            cell.setCellValue("");
+            return;
         }
+        if ("number".equals(col.getColType()) && value instanceof Number) {
+            cell.setCellValue(((Number) value).doubleValue());
+            return;
+        }
+        if (value instanceof Number) {
+            cell.setCellValue(((Number) value).doubleValue());
+            return;
+        }
+        if (value instanceof Boolean) {
+            cell.setCellValue(((Boolean) value).booleanValue());
+            return;
+        }
+        cell.setCellValue(String.valueOf(value));
     }
 
-    // ── Styles ────────────────────────────────────────────────────────────
-
-    private CellStyle buildHeaderStyle(XSSFWorkbook wb, String bgColor, boolean bold, int fontSize) {
-        XSSFCellStyle style = wb.createCellStyle();
+    private CellStyle buildHeaderStyle(SXSSFWorkbook wb, String bgColor, boolean bold, int fontSize) {
+        CellStyle style = wb.createCellStyle();
         Font font = wb.createFont();
         font.setBold(true);
-        font.setFontHeightInPoints((short)(fontSize > 0 ? fontSize : 10));
+        font.setFontHeightInPoints((short) (fontSize > 0 ? fontSize : 10));
         style.setFont(font);
         style.setAlignment(HorizontalAlignment.CENTER);
         style.setVerticalAlignment(VerticalAlignment.CENTER);
@@ -148,8 +202,8 @@ public class NexacroGridExcelBuilder {
         return style;
     }
 
-    private CellStyle buildBandStyle(XSSFWorkbook wb, BandMeta band) {
-        XSSFCellStyle style = wb.createCellStyle();
+    private CellStyle buildBandStyle(SXSSFWorkbook wb, BandMeta band) {
+        CellStyle style = wb.createCellStyle();
         Font font = wb.createFont();
         font.setBold(band.isFontBold());
         font.setFontHeightInPoints((short) 10);
@@ -161,57 +215,102 @@ public class NexacroGridExcelBuilder {
         return style;
     }
 
-    private CellStyle getOrCreateDataStyle(XSSFWorkbook wb, ColumnMeta col,
+    private CellStyle getOrCreateDataStyle(SXSSFWorkbook wb, ColumnMeta col,
+                                           ExcelCellStyleSpec styleSpec,
                                            Map<String, CellStyle> cache) {
-        String key = col.getColId() + "|" + col.getTextAlign() + "|"
-                   + col.getNumberFormat() + "|" + col.getBgColor()
-                   + "|" + col.isFontBold() + "|" + col.getBorderStyle();
-        return cache.computeIfAbsent(key, k -> buildDataStyle(wb, col));
+        String key = buildStyleKey(col, styleSpec);
+        CellStyle style = cache.get(key);
+        if (style == null) {
+            style = buildDataStyle(wb, col, styleSpec);
+            cache.put(key, style);
+        }
+        return style;
     }
 
-    private CellStyle buildDataStyle(XSSFWorkbook wb, ColumnMeta col) {
-        XSSFCellStyle style = wb.createCellStyle();
+    private String buildStyleKey(ColumnMeta col, ExcelCellStyleSpec styleSpec) {
+        return col.getColId() + "|" + valueOrEmpty(styleSpec.getTextAlign(), col.getTextAlign()) + "|"
+                + valueOrEmpty(styleSpec.getNumberFormat(), col.getNumberFormat()) + "|"
+                + valueOrEmpty(styleSpec.getBackgroundColor(), col.getBgColor()) + "|"
+                + valueOrEmpty(styleSpec.getFontBold(), Boolean.valueOf(col.isFontBold())) + "|"
+                + valueOrEmpty(styleSpec.getFontSize(), Integer.valueOf(col.getFontSize())) + "|"
+                + valueOrEmpty(styleSpec.getBorderStyle(), col.getBorderStyle());
+    }
+
+    private String valueOrEmpty(Object overrideValue, Object baseValue) {
+        Object value = overrideValue != null ? overrideValue : baseValue;
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private CellStyle buildDataStyle(SXSSFWorkbook wb, ColumnMeta col, ExcelCellStyleSpec styleSpec) {
+        CellStyle style = wb.createCellStyle();
         Font font = wb.createFont();
-        font.setBold(col.isFontBold());
-        font.setFontHeightInPoints((short)(col.getFontSize() > 0 ? col.getFontSize() : 10));
+        boolean bold = styleSpec.getFontBold() != null ? styleSpec.getFontBold().booleanValue() : col.isFontBold();
+        int fontSize = styleSpec.getFontSize() != null ? styleSpec.getFontSize().intValue() : col.getFontSize();
+        String align = styleSpec.getTextAlign() != null ? styleSpec.getTextAlign() : col.getTextAlign();
+        String borderStyle = styleSpec.getBorderStyle() != null ? styleSpec.getBorderStyle() : col.getBorderStyle();
+        String backgroundColor = styleSpec.getBackgroundColor() != null ? styleSpec.getBackgroundColor() : col.getBgColor();
+        String numberFormat = styleSpec.getNumberFormat() != null ? styleSpec.getNumberFormat() : col.getNumberFormat();
+
+        font.setBold(bold);
+        font.setFontHeightInPoints((short) (fontSize > 0 ? fontSize : 10));
         style.setFont(font);
-        style.setAlignment(toHAlign(col.getTextAlign()));
+        style.setAlignment(toHAlign(align));
         style.setVerticalAlignment(VerticalAlignment.CENTER);
-        applyBorder(style, col.getBorderStyle());
-        if (col.getBgColor() != null) applyBgColor(style, col.getBgColor());
-        if ("number".equals(col.getColType()) && col.getNumberFormat() != null) {
+        applyBorder(style, borderStyle);
+        if (backgroundColor != null) {
+            applyBgColor(style, backgroundColor);
+        }
+        if ("number".equals(col.getColType()) && numberFormat != null) {
             DataFormat dataFormat = wb.createDataFormat();
-            style.setDataFormat(dataFormat.getFormat(col.getNumberFormat()));
+            style.setDataFormat(dataFormat.getFormat(numberFormat));
         }
         return style;
     }
 
     private HorizontalAlignment toHAlign(String align) {
-        if (align == null) return HorizontalAlignment.LEFT;
-        switch (align.toLowerCase()) {
-            case "center": return HorizontalAlignment.CENTER;
-            case "right":  return HorizontalAlignment.RIGHT;
-            default:       return HorizontalAlignment.LEFT;
+        if (align == null) {
+            return HorizontalAlignment.LEFT;
         }
+        String lower = align.toLowerCase();
+        if ("center".equals(lower)) {
+            return HorizontalAlignment.CENTER;
+        }
+        if ("right".equals(lower)) {
+            return HorizontalAlignment.RIGHT;
+        }
+        return HorizontalAlignment.LEFT;
     }
 
-    private void applyBorder(XSSFCellStyle style, String borderStyle) {
+    private void applyBorder(CellStyle style, String borderStyle) {
         BorderStyle bs = BorderStyle.THIN;
-        if ("medium".equals(borderStyle)) bs = BorderStyle.MEDIUM;
-        else if ("thick".equals(borderStyle))  bs = BorderStyle.THICK;
-        else if ("none".equals(borderStyle))   bs = BorderStyle.NONE;
-        style.setBorderTop(bs); style.setBorderBottom(bs);
-        style.setBorderLeft(bs); style.setBorderRight(bs);
+        if ("medium".equals(borderStyle)) {
+            bs = BorderStyle.MEDIUM;
+        } else if ("thick".equals(borderStyle)) {
+            bs = BorderStyle.THICK;
+        } else if ("none".equals(borderStyle)) {
+            bs = BorderStyle.NONE;
+        }
+        style.setBorderTop(bs);
+        style.setBorderBottom(bs);
+        style.setBorderLeft(bs);
+        style.setBorderRight(bs);
     }
 
-    private void applyBgColor(XSSFCellStyle style, String hexColor) {
-        if (hexColor == null || !hexColor.startsWith("#")) return;
+    private void applyBgColor(CellStyle style, String hexColor) {
+        if (hexColor == null || !hexColor.startsWith("#")) {
+            return;
+        }
+        if (!(style instanceof XSSFCellStyle)) {
+            return;
+        }
         try {
             Color c = Color.decode(hexColor);
             XSSFColor xssfColor = new XSSFColor(c, null);
-            style.setFillForegroundColor(xssfColor);
-            style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        } catch (NumberFormatException ignored) {}
+            XSSFCellStyle xssfStyle = (XSSFCellStyle) style;
+            xssfStyle.setFillForegroundColor(xssfColor);
+            xssfStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        } catch (NumberFormatException ignored) {
+        }
     }
 
     private void setColumnWidths(Sheet sheet, List<ColumnMeta> columns) {

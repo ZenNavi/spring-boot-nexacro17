@@ -4,6 +4,8 @@ import com.example.nexacro.dto.CodeMst;
 import com.example.nexacro.excel.*;
 import com.example.nexacro.mapper.ComboMapper;
 import com.example.nexacro.mapper.SalesMapper;
+import org.apache.ibatis.session.ResultContext;
+import org.apache.ibatis.session.ResultHandler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,10 +22,11 @@ class ExcelExportServiceTest {
     @Mock SalesMapper salesMapper;
     @Mock ComboMapper comboMapper;
     @Mock NexacroGridExcelBuilder excelBuilder;
+    @Mock ExcelRenderPolicy defaultRenderPolicy;
     @InjectMocks ExcelExportService service;
 
     @Test
-    void exportExcel_queries_db_and_returns_bytes() throws Exception {
+    void exportExcel_queries_db_with_row_handler_and_returns_bytes() throws Exception {
         List<ColumnMeta> columns = Collections.singletonList(
             ColumnMeta.builder().colId("regionCd").headerText("지역")
                 .editType("combo").comboGroupCd("REGION")
@@ -40,17 +43,29 @@ class ExcelExportServiceTest {
 
         when(comboMapper.selectByGroupCds(Collections.singletonList("REGION")))
             .thenReturn(Collections.singletonList(code));
-        when(salesMapper.selectAll())
-            .thenReturn(Collections.singletonList(row));
-        when(excelBuilder.build(eq(columns), eq(bands), eq(Collections.singletonList(row)),
-                                any(ComboResolver.class)))
-            .thenReturn(new byte[]{1, 2, 3});
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ResultHandler<Map<String, Object>> handler = invocation.getArgument(0);
+            handler.handleResult(new SimpleResultContext<Map<String, Object>>(row));
+            return null;
+        }).when(salesMapper).selectAllWithHandler(any());
+        when(excelBuilder.build(eq(columns), eq(bands), any(ExcelRowWriter.class),
+                                any(ComboResolver.class), eq(defaultRenderPolicy)))
+            .thenAnswer(invocation -> {
+                ExcelRowWriter writer = invocation.getArgument(2);
+                writer.writeRows(new ExcelRowConsumer() {
+                    @Override
+                    public void accept(Map<String, Object> rowData) {
+                    }
+                });
+                return new byte[]{1, 2, 3};
+            });
 
         byte[] result = service.exportExcel(columns, bands);
 
         assertThat(result).isEqualTo(new byte[]{1, 2, 3});
         verify(comboMapper).selectByGroupCds(Collections.singletonList("REGION"));
-        verify(salesMapper).selectAll();
+        verify(salesMapper).selectAllWithHandler(any());
     }
 
     @Test
@@ -60,12 +75,60 @@ class ExcelExportServiceTest {
                 .colType("number").numberFormat("#,##0").textAlign("right")
                 .colWidth(120).fontSize(10).borderStyle("thin").build()
         );
-        when(salesMapper.selectAll()).thenReturn(Collections.emptyList());
-        when(excelBuilder.build(any(), any(), any(), any())).thenReturn(new byte[]{});
+        when(excelBuilder.build(any(), any(), any(ExcelRowWriter.class), any(), eq(defaultRenderPolicy)))
+                .thenReturn(new byte[]{});
 
         byte[] result = service.exportExcel(columns, Collections.emptyList());
 
         assertThat(result).isNotNull();
         verify(comboMapper, never()).selectByGroupCds(any());
+    }
+
+    @Test
+    void exportExcel_accepts_direct_list_and_custom_policy() throws Exception {
+        List<ColumnMeta> columns = Collections.singletonList(
+                ColumnMeta.builder().colId("regDate").headerText("등록일")
+                        .colType("text").dateFormat("yyyy/MM/dd")
+                        .colWidth(120).fontSize(10).borderStyle("thin").build()
+        );
+        List<Map<String, Object>> rows = Collections.singletonList(new LinkedHashMap<String, Object>() {{
+            put("regDate", "20260227");
+        }});
+        ExcelRenderPolicy customPolicy = mock(ExcelRenderPolicy.class);
+
+        when(excelBuilder.build(eq(columns), eq(Collections.<BandMeta>emptyList()), eq(rows), any(ComboResolver.class), eq(customPolicy)))
+                .thenReturn(new byte[]{9});
+
+        byte[] result = service.exportExcel(columns, Collections.<BandMeta>emptyList(), rows, customPolicy);
+
+        assertThat(result).isEqualTo(new byte[]{9});
+        verify(salesMapper, never()).selectAllWithHandler(any());
+    }
+
+    private static class SimpleResultContext<T> implements ResultContext<T> {
+        private final T resultObject;
+
+        private SimpleResultContext(T resultObject) {
+            this.resultObject = resultObject;
+        }
+
+        @Override
+        public T getResultObject() {
+            return resultObject;
+        }
+
+        @Override
+        public int getResultCount() {
+            return 1;
+        }
+
+        @Override
+        public boolean isStopped() {
+            return false;
+        }
+
+        @Override
+        public void stop() {
+        }
     }
 }

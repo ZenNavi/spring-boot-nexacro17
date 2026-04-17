@@ -24,4 +24,19 @@
         ORDER BY ID
     </select>
 
+    <select id="selectAllWithHandler" resultType="java.util.LinkedHashMap">
+        SELECT
+            ID              AS id,
+            REGION_CD       AS regionCd,
+            CATEGORY_CD     AS categoryCd,
+            Q1_SALES        AS q1Sales,
+            Q1_QTY          AS q1Qty,
+            Q2_SALES        AS q2Sales,
+            Q2_QTY          AS q2Qty,
+            TOTAL_SALES     AS totalSales,
+            REG_DATE        AS regDate
+        FROM SALES_DATA
+        ORDER BY ID
+    </select>
+
 </mapper>
