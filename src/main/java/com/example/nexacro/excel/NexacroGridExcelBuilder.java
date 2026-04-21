@@ -230,7 +230,7 @@ public class NexacroGridExcelBuilder {
     private CellStyle buildBandStyle(SXSSFWorkbook wb, BandMeta band) {
         CellStyle style = wb.createCellStyle();
         Font font = wb.createFont();
-        font.setBold(band.isFontBold());
+        font.setBold(true);
         font.setFontHeightInPoints((short) 10);
         style.setFont(font);
         style.setAlignment(toHAlign(band.getTextAlign()));
@@ -313,6 +313,8 @@ public class NexacroGridExcelBuilder {
         return HorizontalAlignment.LEFT;
     }
 
+    private static final Color BORDER_COLOR = new Color(47, 47, 47);
+
     private void applyBorder(CellStyle style, String borderStyle) {
         BorderStyle bs = BorderStyle.THIN;
         if ("medium".equals(borderStyle)) {
@@ -326,6 +328,15 @@ public class NexacroGridExcelBuilder {
         style.setBorderBottom(bs);
         style.setBorderLeft(bs);
         style.setBorderRight(bs);
+
+        if (bs != BorderStyle.NONE && style instanceof XSSFCellStyle) {
+            XSSFCellStyle xssfStyle = (XSSFCellStyle) style;
+            XSSFColor borderColor = new XSSFColor(BORDER_COLOR, null);
+            xssfStyle.setTopBorderColor(borderColor);
+            xssfStyle.setBottomBorderColor(borderColor);
+            xssfStyle.setLeftBorderColor(borderColor);
+            xssfStyle.setRightBorderColor(borderColor);
+        }
     }
 
     private void applyBgColor(CellStyle style, String hexColor) {
