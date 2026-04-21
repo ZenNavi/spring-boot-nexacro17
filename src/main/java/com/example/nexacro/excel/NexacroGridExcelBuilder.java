@@ -66,7 +66,8 @@ public class NexacroGridExcelBuilder {
             boolean hasBands = bands != null && !bands.isEmpty();
 
             int dataStartRow = createHeader(workbook, sheet, columns, bands, hasBands);
-            createDataRows(workbook, sheet, columns, rowWriter, comboResolver, renderPolicy, dataStartRow);
+            int dataEndRow = createDataRows(workbook, sheet, columns, rowWriter, comboResolver, renderPolicy, dataStartRow);
+            createSummaryBands(workbook, sheet, columns, bands, dataEndRow);
             setColumnWidths(sheet, columns);
             sheet.createFreezePane(0, dataStartRow);
 
@@ -88,7 +89,16 @@ public class NexacroGridExcelBuilder {
      */
     private int createHeader(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
                              List<BandMeta> bands, boolean hasBands) {
-        if (!hasBands) {
+        // 헤더는 상단 band(=position이 null/top)만 대상으로 한다. 하단(summary) band는 제외.
+        List<BandMeta> topBands = new ArrayList<>();
+        if (hasBands) {
+            for (BandMeta b : bands) {
+                if (!b.isBottomBand()) topBands.add(b);
+            }
+        }
+        boolean hasTopBands = !topBands.isEmpty();
+
+        if (!hasTopBands) {
             Row row = sheet.createRow(0);
             row.setHeightInPoints(20);
             for (int i = 0; i < columns.size(); i++) {
@@ -101,7 +111,7 @@ public class NexacroGridExcelBuilder {
         }
 
         // Sort bands by bandOrder
-        List<BandMeta> sortedBands = new ArrayList<>(bands);
+        List<BandMeta> sortedBands = new ArrayList<>(topBands);
         sortedBands.sort(Comparator.comparingInt(BandMeta::getBandOrder));
 
         Row row0 = sheet.createRow(0);
@@ -159,10 +169,10 @@ public class NexacroGridExcelBuilder {
      * <p>이 메서드가 builder 확장의 핵심이다. row source는 List일 수도 있고,
      * ResultHandler 기반 스트리밍일 수도 있다.</p>
      */
-    private void createDataRows(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
-                                ExcelRowWriter rowWriter, ComboResolver comboResolver,
-                                ExcelRenderPolicy renderPolicy,
-                                int startRowIdx) {
+    private int createDataRows(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
+                               ExcelRowWriter rowWriter, ComboResolver comboResolver,
+                               ExcelRenderPolicy renderPolicy,
+                               int startRowIdx) {
         final Map<String, CellStyle> styleCache = new HashMap<String, CellStyle>();
         final int[] rowIndex = new int[]{startRowIdx};
         try {
@@ -191,6 +201,45 @@ public class NexacroGridExcelBuilder {
             throw ex;
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to write excel rows", ex);
+        }
+        return rowIndex[0];
+    }
+
+    // ── Summary (Bottom) Bands ────────────────────────────────────────────
+
+    /**
+     * position="bottom"인 band들을 데이터 영역 하단에 요약 행으로 기록한다.
+     *
+     * <p>bandOrder 오름차순으로 컬럼 0부터 순차 배치하고, 각 band는 colSpan 만큼의
+     * 셀을 병합해 차지한다. colSpan이 0 이하이면 1로 간주한다.</p>
+     */
+    private void createSummaryBands(SXSSFWorkbook wb, Sheet sheet, List<ColumnMeta> columns,
+                                    List<BandMeta> bands, int startRowIdx) {
+        if (bands == null || bands.isEmpty()) return;
+        List<BandMeta> bottomBands = new ArrayList<>();
+        for (BandMeta b : bands) {
+            if (b.isBottomBand()) bottomBands.add(b);
+        }
+        if (bottomBands.isEmpty()) return;
+        bottomBands.sort(Comparator.comparingInt(BandMeta::getBandOrder));
+
+        Row row = sheet.createRow(startRowIdx);
+        row.setHeightInPoints(20);
+
+        int colIdx = 0;
+        int maxCol = columns.size();
+        for (BandMeta band : bottomBands) {
+            if (colIdx >= maxCol) break;
+            int span = band.getColSpan() > 0 ? band.getColSpan() : 1;
+            int endCol = Math.min(colIdx + span - 1, maxCol - 1);
+
+            Cell cell = row.createCell(colIdx);
+            cell.setCellValue(band.getBandText());
+            cell.setCellStyle(buildBandStyle(wb, band));
+            if (endCol > colIdx) {
+                sheet.addMergedRegion(new CellRangeAddress(startRowIdx, startRowIdx, colIdx, endCol));
+            }
+            colIdx = endCol + 1;
         }
     }
 

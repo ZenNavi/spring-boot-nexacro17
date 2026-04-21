@@ -192,6 +192,48 @@ class NexacroGridExcelBuilderTest {
         wb.close();
     }
 
+    @Test
+    void bottom_band_renders_below_data_rows() throws Exception {
+        List<ColumnMeta> columns = Arrays.asList(
+            col("regionCd", "지역", "left"),
+            colNumber("q1Sales", "매출액"),
+            colNumber("q1Qty", "수량")
+        );
+        List<BandMeta> bands = Arrays.asList(
+            BandMeta.builder().bandId("SUM").bandText("합계")
+                    .colSpan(3).rowSpan(1).bandOrder(1)
+                    .bgColor("#F4B084").textAlign("center").fontBold(true)
+                    .position("bottom").build()
+        );
+        Map<String, Object> dataRow = new LinkedHashMap<>();
+        dataRow.put("regionCd", "SEO");
+        dataRow.put("q1Sales", 100L);
+        dataRow.put("q1Qty", 5L);
+
+        byte[] bytes = builder.build(columns, bands,
+            Collections.singletonList(dataRow),
+            new ComboResolver(Collections.emptyList()));
+
+        Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes));
+        Sheet sheet = wb.getSheetAt(0);
+        // header row 0, data row 1, summary row 2
+        assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("지역");
+        assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("SEO");
+        assertThat(sheet.getRow(2).getCell(0).getStringCellValue()).isEqualTo("합계");
+        // merged region for summary band spans all 3 columns on row 2
+        boolean merged = false;
+        for (int i = 0; i < sheet.getNumMergedRegions(); i++) {
+            org.apache.poi.ss.util.CellRangeAddress r = sheet.getMergedRegion(i);
+            if (r.getFirstRow() == 2 && r.getLastRow() == 2
+                    && r.getFirstColumn() == 0 && r.getLastColumn() == 2) {
+                merged = true;
+                break;
+            }
+        }
+        assertThat(merged).isTrue();
+        wb.close();
+    }
+
     // Helpers
     private ColumnMeta col(String id, String header, String align) {
         return ColumnMeta.builder().colId(id).headerText(header)
