@@ -9,19 +9,20 @@ public class BandMeta {
     private String bgColor;
     private String textAlign;
     private boolean fontBold;
+    private String position;
 
     public BandMeta() {}
 
     private BandMeta(Builder b) {
         this.bandId = b.bandId; this.bandText = b.bandText; this.colSpan = b.colSpan;
         this.rowSpan = b.rowSpan; this.bandOrder = b.bandOrder; this.bgColor = b.bgColor;
-        this.textAlign = b.textAlign; this.fontBold = b.fontBold;
+        this.textAlign = b.textAlign; this.fontBold = b.fontBold; this.position = b.position;
     }
 
     public static Builder builder() { return new Builder(); }
 
     public static class Builder {
-        private String bandId, bandText, bgColor, textAlign;
+        private String bandId, bandText, bgColor, textAlign, position;
         private int colSpan, rowSpan, bandOrder;
         private boolean fontBold;
 
@@ -33,6 +34,7 @@ public class BandMeta {
         public Builder bgColor(String v)    { this.bgColor = v; return this; }
         public Builder textAlign(String v)  { this.textAlign = v; return this; }
         public Builder fontBold(boolean v)  { this.fontBold = v; return this; }
+        public Builder position(String v)   { this.position = v; return this; }
         public BandMeta build()             { return new BandMeta(this); }
     }
 
@@ -52,4 +54,8 @@ public class BandMeta {
     public void setTextAlign(String v)  { this.textAlign = v; }
     public boolean isFontBold()         { return fontBold; }
     public void setFontBold(boolean v)  { this.fontBold = v; }
+    public String getPosition()         { return position; }
+    public void setPosition(String v)   { this.position = v; }
+
+    public boolean isBottomBand() { return "bottom".equalsIgnoreCase(position); }
 }
